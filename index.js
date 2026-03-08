@@ -1474,10 +1474,6 @@ app.get("/leaderboard", async (req, res) => {
   res.send(leaderboard);
 });
 
-
-          // month rising star part
-
-
 app.get("/monthly_rising_stars", async (req, res) => {
   const client = await dbConnect();
   const db = client.db(db_database.deal_bondhu_database);
@@ -1596,10 +1592,6 @@ app.put("/update_heading_marquee_text", async (req, res) => {
   );
   res.send(result);
 });
-
-
-              // intent score part 
-
 
 app.post("/calculate_intent_score", async (req, res) => {
   const agent = user_agent.parse(req.headers["user-agent"]);
@@ -1765,25 +1757,24 @@ app.post("/calculate_intent_score", async (req, res) => {
     if (!site_visited) {
       currentScore += 10;
       const intent_level = intentLevelCalculator(currentScore);
-    await intent_score_collection.updateOne(
-      { user_id, product_id },
-      {
-        $set: {
-          intent_score: currentScore,
-          intent_level: intent_level,
-          updated_at: new Date(),
-          previousData: {
-            device: previousData.device,
-            location: previousData.location,
-            visit_time: previousData.visit_time,
-            time_spent: previousData.time_spent,
-            site_visited: true,
+      await intent_score_collection.updateOne(
+        { user_id, product_id },
+        {
+          $set: {
+            intent_score: currentScore,
+            intent_level: intent_level,
+            updated_at: new Date(),
+            previousData: {
+              device: previousData.device,
+              location: previousData.location,
+              visit_time: previousData.visit_time,
+              time_spent: previousData.time_spent,
+              site_visited: true,
+            },
           },
         },
-      },
-    );
+      );
     }
-    
   } else if (session === "leave") {
     const { intent_score, lastVisited, previousData } = find_intent_document;
 
@@ -1812,7 +1803,7 @@ app.post("/calculate_intent_score", async (req, res) => {
             location: previousData.location,
             visit_time: previousData.visit_time,
             time_spent: modified_time_spent,
-            site_visited : previousData.site_visited
+            site_visited: previousData.site_visited,
           },
         },
       },
@@ -1827,7 +1818,6 @@ app.get("/revenue", async (req, res) => {
     const client = await dbConnect();
     const db = client.db(db_database.deal_bondhu_database);
     const intent_score_collection = db.collection(db_collections.intent_score);
-    const product_collection = db.collection(db_collections.products);
 
     const pipeline = [
       {
@@ -1835,7 +1825,6 @@ app.get("/revenue", async (req, res) => {
           product_obj_id: { $toObjectId: "$product_id" },
         },
       },
-
       {
         $lookup: {
           from: db_collections.products,
@@ -1844,41 +1833,29 @@ app.get("/revenue", async (req, res) => {
           as: "product_info",
         },
       },
-
       { $unwind: "$product_info" },
-
       {
         $group: {
           _id: "$product_id",
-
           title: { $first: "$product_info.title" },
           product_image: { $first: "$product_info.product_image" },
-
           company: { $first: "$product_info.company" },
           category: { $first: "$product_info.category" },
           subcategory: { $first: "$product_info.subcategory" },
           dealer_id: { $first: "$product_info.dealer_id" },
-
-          offer_price: {
-            $first: { $toDouble: "$product_info.offer_price" },
-          },
-
+          offer_price: { $first: { $toDouble: "$product_info.offer_price" } },
           total_users: { $sum: 1 },
-
           high_intent_users: {
             $sum: { $cond: [{ $eq: ["$intent_level", "high"] }, 1, 0] },
           },
-
           medium_intent_users: {
             $sum: { $cond: [{ $eq: ["$intent_level", "medium"] }, 1, 0] },
           },
-
           low_intent_users: {
             $sum: { $cond: [{ $eq: ["$intent_level", "low"] }, 1, 0] },
           },
         },
       },
-
       {
         $addFields: {
           intent_breakdown: {
@@ -1886,21 +1863,13 @@ app.get("/revenue", async (req, res) => {
             medium: "$medium_intent_users",
             low: "$low_intent_users",
           },
-
           estimated_purchases: {
-            high: {
-              $round: [{ $multiply: ["$high_intent_users", 0.08] }, 0],
-            },
-            medium: {
-              $round: [{ $multiply: ["$medium_intent_users", 0.04] }, 0],
-            },
-            low: {
-              $round: [{ $multiply: ["$low_intent_users", 0.01] }, 0],
-            },
+            high: { $multiply: ["$high_intent_users", 0.08] },
+            medium: { $multiply: ["$medium_intent_users", 0.04] },
+            low: { $multiply: ["$low_intent_users", 0.01] },
           },
         },
       },
-
       {
         $addFields: {
           estimated_purchases_total: {
@@ -1912,20 +1881,20 @@ app.get("/revenue", async (req, res) => {
           },
         },
       },
-
       {
         $addFields: {
           revenue_estimate: {
             avg_price: "$offer_price",
             total_bdt: {
-              $multiply: ["$estimated_purchases_total", "$offer_price"],
+              $round: [
+                { $multiply: ["$estimated_purchases_total", "$offer_price"] },
+                0,
+              ],
             },
           },
-
           created_at: new Date(),
         },
       },
-
       {
         $project: {
           high_intent_users: 0,
@@ -1933,7 +1902,6 @@ app.get("/revenue", async (req, res) => {
           low_intent_users: 0,
         },
       },
-
       { $sort: { "revenue_estimate.total_bdt": -1 } },
     ];
 
@@ -1943,6 +1911,40 @@ app.get("/revenue", async (req, res) => {
     console.error(error);
     return res.status(500).send({ success: false, error: error.message });
   }
+});
+
+app.get("/search/:keyword", async (req, res) => {
+  const client = await dbConnect();
+  const db = client.db(db_database.deal_bondhu_database);
+  const products_collection = db.collection(db_collections.products);
+
+  const keyword = decodeURIComponent(req.params.keyword);
+
+  const result = await products_collection
+    .find({
+      title: {
+        $regex: keyword,
+        $options: "i",
+      },
+    })
+    .toArray();
+
+  res.send(result);
+});
+
+app.get("/search_by_keyword/:keyword", async (req, res) => {
+  const client = await dbConnect();
+  const db = client.db(db_database.deal_bondhu_database);
+  const products_collection = db.collection(db_collections.products);
+
+  const keyword = decodeURIComponent(req.params.keyword);
+  
+  const results = await products_collection
+    .find({ title: { $regex: keyword, $options: "i" } })
+    .limit(5)
+    .toArray();
+
+  res.json(results);
 });
 
 // app.get("/operation", async (req, res) => {
